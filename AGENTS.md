@@ -4,16 +4,17 @@ Guide for agents and developers working in this repo. `CLAUDE.md` points here.
 
 ## What this is
 
-`CPF-MMCI-DigitalPathology-Mapper` maps MMCI biobank / digital-pathology records
-into Common Provenance Model (CPM, ISO 23494) documents and uploads them to
-**CPF-Storage**. It is the middle stage of the Common Provenance Framework:
+`CPF-MMCI-DigitalPathology-Mapper` maps biobank / digital-pathology records into
+Common Provenance Model (CPM, ISO 23494) documents and uploads them to
+**CPF-Storage**. It is one component of the Common Provenance Framework:
 
 ```
-ProvenanceSource → SourceRecord → CpmMapper (+ProvenanceProfile)
-  → CpmDocument → ProfileValidator → PROV-JSON → DocumentSigner → ProvenanceStore
+input system → read a record → map to a CPM document
+            → serialize PROV-JSON → sign → store in CPF-Storage
 ```
 
-Full design and "how to add X" recipes: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+Architecture is hexagonal (ports & adapters). Full design and "how to add X"
+recipes: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Status
 
@@ -25,7 +26,7 @@ No production code yet — implementation follows the recipes in ARCHITECTURE.md
 - **JDK 25** (latest LTS) and Maven 3.9+.
 - Build: `mvn package` → runnable jar `target/cpf-mmci-mapper.jar`.
 - Test: `mvn test`.
-- Run (once `cli.MapCommand` exists): `java -jar target/cpf-mmci-mapper.jar map ...`.
+- Run: a CLI entry point in `cli` (once it exists) → `java -jar target/cpf-mmci-mapper.jar ...`.
 
 ### Prerequisite: the CPM library
 
@@ -47,17 +48,17 @@ End-to-end runs need CPF-Storage up (cloned at `../CPF-Storage`):
 Register an organization, then upload. See CPF-Storage's README for cert
 generation and the document-upload contract.
 
-## Ports (the swap points)
+## The boundaries (swap points)
 
-| Port | Direction | Purpose |
-|---|---|---|
-| `ProvenanceSource` | in | yields `SourceRecord`s (mock now, LIS later) |
-| `CpmMapper` | in | turns a `SourceRecord` + profile into a `CpmDocument` |
-| `ProvenanceStore` | out | persists a finalized document (CPF-Storage REST) |
-| `DocumentSigner` | out | signs the document for storage (SHA256withECDSA) |
+Nothing is implemented yet. The intended edges, each to sit behind a port
+interface in `port/`:
 
-To add a mapper / source / profile / store, follow the recipes in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#5-how-to-add-x).
+- **input** — read records from a source (`adapter/in`)
+- **mapping** — turn a record into a CPM document (`adapter/map`)
+- **output** — persist to CPF-Storage and sign for storage (`adapter/out`)
+
+To add a source / mapper / store, follow the recipes in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#how-to-add-x).
 
 ## Conventions
 
@@ -65,8 +66,6 @@ To add a mapper / source / profile / store, follow the recipes in
   imports. Those belong in `adapter/`.
 - **All wiring lives in `cli/`** (the composition root). The domain only ever
   sees ports.
-- **The configurable minimal-scope model lives in `resources/profiles/*.yaml`** —
-  adding/tightening a profile is data, not code.
 - Non-trivial logic ships with one runnable check (a JUnit test or an
   `assert`-based self-check). No test framework sprawl.
 

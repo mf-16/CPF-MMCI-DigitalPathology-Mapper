@@ -89,7 +89,7 @@
         <finalName>cpf-mmci-mapper</finalName>
         <plugins>
             <!-- Bundles deps into a single runnable jar for the CLI.
-                 Main class set once the cli.MapCommand entry point exists. -->
+                 Set the main class once a CLI entry point exists in cli/. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>

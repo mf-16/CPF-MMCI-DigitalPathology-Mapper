@@ -1,184 +1,124 @@
 # Architecture
 
-This document describes how the project is built and **exactly how to add new
-things** later. The `src/` tree is scaffolded but empty — read this before
-writing the first class.
+For whoever works on the system next — developer or AI. It states what the
+product does, the architectural pattern it follows, and where new code goes.
 
-## 1. Purpose & place
+Nothing is implemented yet: the `src/` tree is an empty skeleton (`.gitkeep`
+placeholders). This document describes the **intended structure**, not existing
+code. No class or interface named below exists yet — the names appear only when
+they are written.
 
-This repo is the **missing middle** of the Common Provenance Framework (CPF): it
-takes biobank / digital-pathology records and turns them into Common Provenance
-Model (CPM, ISO 23494) documents, then stores them.
+## What this is
+
+This service maps biobank and digital-pathology records into **Common Provenance
+Model (CPM, ISO 23494)** documents and persists them. It is one component of the
+Common Provenance Framework (CPF), and it integrates with two external systems:
+
+- **Upstream:** the CPM library (`cz.muni.fi.cpm:cpm-core` + `cpm-template`,
+  built on ProvToolbox) — used to build and serialize CPM documents.
+- **Downstream:** **CPF-Storage** — a REST service (Spring Boot + Neo4j) that
+  persists a signed, base64-encoded PROV-JSON document.
+
+The work is a pipeline, conceptually:
 
 ```
- (this repo)
- ┌──────────────────────────────────────────────────────────────────┐
- │  ProvenanceSource ──▶ SourceRecord ──▶ CpmMapper ──▶ CpmDocument   │
- │        ▲                              (+ProvenanceProfile)  │       │
- │        │                                                    ▼       │
- │   mock / LIS                                         ProfileValidator│
- │                                                            │        │
- │                                                       PROV-JSON      │
- │                                                            │        │
- │                                                      DocumentSigner  │
- │                                                            │        │
- │                                                      ProvenanceStore │
- └────────────────────────────────────────────────────────────│──────┘
-   uses ─▶ CPM library (cz.muni.fi.cpm:cpm-core)          POST ▼
-                                                       CPF-Storage REST
-                                                       (+ Neo4j)
+input system → read a record → map it to a CPM document
+            → serialize to PROV-JSON → sign → store in CPF-Storage
 ```
 
-- **Upstream dependency:** the CPM library (`cz.muni.fi.cpm:cpm-core` +
-  `cpm-template`) builds and serializes `CpmDocument`s.
-- **Downstream dependency:** `CPF-Storage` (Spring Boot + Neo4j) persists a
-  signed, base64 PROV-JSON document via `POST /api/v1/documents` after the
-  organization is registered via `POST /api/v1/organizations`.
+## Why hexagonal (ports & adapters)
 
-## 2. Why hexagonal (ports & adapters)
+The system is defined by its edges: an **input data source**, a **storage
+service**, and the **CPM library / crypto** it builds on. Those are exactly the
+parts that change independently of the system itself:
 
-Two things are unknown / unstable today:
+- **Input sources differ and change** — how a record is *read* should not dictate
+  how it is *mapped* or *stored*.
+- **Mapping rules evolve** — the translation from a record to CPM is the part
+  most likely to be revised, and it should be revisable without touching I/O.
+- **Storage and crypto are external concerns** — an HTTP service and a signing
+  algorithm are integration details, not business logic.
+- **Testability** — the core logic must run in a unit test with no live database,
+  no storage service, and no network.
 
-- **No access to the real LIS database** → the input must be swappable (mock
-  now, real LIS later).
-- **The digital-pathology field mapping is not finalized** → the mapping must be
-  swappable without disturbing anything else.
-
-Hexagonal architecture isolates both behind interfaces, so the unstable parts
-live at the edges and the stable core never changes when they do.
+Hexagonal architecture puts each volatile concern behind an interface at the
+edge, so the stable core depends on none of them. Replacing a source, revising a
+mapping, or changing the storage backend stays a local change at one edge.
 
 ### The one rule
 
-**Dependencies point inward. The domain depends on nothing.**
+**Dependencies point inward. The core depends on nothing.**
 
 Three rings:
 
 ```
    ADAPTERS (outside)  — talk to the world (HTTP, files, DB, CPM lib, crypto)
-     PORTS (interfaces) — the contracts the domain declares
+     PORTS (interfaces) — the contracts the core declares
        DOMAIN (center)  — pure logic + orchestration, no I/O, no frameworks
 ```
 
-The domain imports only ports (interfaces). Adapters implement those ports and
-are wired into the domain in exactly one place: the CLI (composition root).
+The domain imports only ports (interfaces). Adapters implement those ports. The
+two are connected in exactly one place — the composition root in `cli`.
 
 ### "What goes where" test
 
 - Mentions a technology (HTTP / file / DB / CPM library / crypto)? → **adapter**
 - A pure rule or orchestration step? → **domain**
-- A method the domain needs but can't implement itself? → **port**
+- A boundary the domain needs but cannot implement itself? → **port** (interface)
 
-If the domain still compiles after you delete every adapter, the boundary is correct.
+If the domain still compiles after every adapter is deleted, the boundary is correct.
 
-## 3. Package layout
+## Directory skeleton
 
-Base package `cz.muni.fi.cpf.mmci`.
+Base package `cz.muni.fi.cpf.mmci`. Each directory exists (empty) with the role
+below.
 
-| Package | Ring | Holds |
+| Directory | Ring | Role — what belongs here |
 |---|---|---|
-| `domain.model` | domain | `SourceRecord` (neutral input), `FinalizedDocument` (output payload) |
-| `domain.profile` | domain | `ProvenanceProfile`, `ProfileValidator` — the configurable minimal-scope model |
-| `domain` | domain | `MappingPipeline` — orchestrates source → map → validate → store |
-| `port` | port | `ProvenanceSource`, `CpmMapper`, `ProvenanceStore`, `DocumentSigner` |
-| `adapter.in` | adapter | `SampleFileSource` (now), `LisSource` (later) — implement `ProvenanceSource` |
-| `adapter.map` | adapter | `DigitalPathologyMapper` — implements `CpmMapper`, uses the CPM library |
-| `adapter.out` | adapter | `CpfStorageClient` (`ProvenanceStore`), `EcDocumentSigner` (`DocumentSigner`) |
-| `cli` | adapter | `MapCommand` — composition root: builds concrete adapters, hands them to the domain |
+| `domain/model` | domain | plain value types passed along the pipeline |
+| `domain` | domain | the orchestration that drives read → map → sign → store |
+| `port` | port | the interfaces the domain declares: input boundaries (reading records, mapping) and output boundaries (storing, signing) |
+| `adapter/in` | adapter | read from an input system, produce the domain's input type |
+| `adapter/map` | adapter | build CPM documents (uses the CPM library) |
+| `adapter/out` | adapter | persist to CPF-Storage; sign for storage |
+| `cli` | adapter | composition root — construct concrete adapters and wire them into the domain |
 
-Resources: `resources/profiles/*.yaml` (provenance profiles),
-`resources/samples/*.json` (stand-in biobank records until LIS access exists).
+A neutral input value type (decoupling the domain from any specific source
+schema) and CPM document handling are the first things to define; see the
+recipes below.
 
-### Key types (intended)
-
-- **`SourceRecord`** — a *neutral* representation of one input record, backed by
-  a Jackson tree (`JsonNode`), **not** bound to any LIS schema. The unknown /
-  changing LIS structure stays entirely inside the source adapter and the mapper;
-  the domain and store never see it. This is what lets development start before
-  the LIS schema is final.
-- **`CpmDocument`** — from the CPM library; produced by the mapper, serialized to
-  PROV-JSON for storage.
-
-## 4. The configurable minimal-scope model (`ProvenanceProfile`)
-
-This is the thesis's core contribution. A **provenance profile** is a
-declarative YAML file that defines *which* CPM elements (agents, activities,
-entities, relations) are **required** for a given process type, conditioned on
-which inputs are available. It answers: "for this kind of biobank process, with
-these inputs present, what is the minimum provenance we must capture?"
-
-`ProfileValidator` checks a mapped `CpmDocument` (or a `SourceRecord` before
-mapping) against the active profile and **reports missing required elements**
-rather than silently emitting an incomplete document.
-
-Intended YAML shape (illustrative — finalize when implementing):
-
-```yaml
-# resources/profiles/digital-pathology.yaml
-profile: digital-pathology
-appliesTo: specimen-digitization        # process type
-required:
-  agents:
-    - role: pathologist                  # must be present
-    - role: scanner-device
-  activities:
-    - type: slide-scanning
-  entities:
-    - type: physical-slide
-    - type: whole-slide-image
-  relations:
-    - type: wasGeneratedBy               # WSI wasGeneratedBy slide-scanning
-      from: whole-slide-image
-      to: slide-scanning
-conditional:
-  # required only when the input record carries staining metadata
-  - when: input.has("staining")
-    requireActivities: [staining]
-```
-
-A new process type = a new YAML file. No code change to add or tighten a profile.
-
-## 5. How to add X
+## How to add X
 
 Each recipe names the ring you touch and what you must **not** touch.
 
+### Add an input source
+
+1. Add a class in `adapter/in` that reads the source and produces the domain's
+   neutral input type. Keep all source-specific schema knowledge inside it.
+2. Make it satisfy the input port the domain declares in `port`.
+3. Wire it in the `cli` composition root.
+- **Do not touch:** domain, mapping, output adapters.
+
 ### Add or replace a mapping
 
-1. Create a class in `adapter.map` implementing `CpmMapper`.
-2. Build the `CpmDocument` using CPM-library factories (`CpmMergedFactory` /
+1. Add a class in `adapter/map` that turns the domain's input type into a CPM
+   document, using the CPM library factories (`CpmMergedFactory` /
    `CpmOrderedFactory` / `CpmUnorderedFactory`) and/or `cpm-template`.
-3. Wire it in `cli.MapCommand` (one line: pass your mapper into the pipeline).
-- **Do not touch:** `domain`, `port`, other adapters. The mapping changing is
-  expected churn — it is behind `CpmMapper` precisely so it stays contained.
-
-### Add a new input source (e.g. the real LIS)
-
-1. Create a class in `adapter.in` implementing `ProvenanceSource`.
-2. Convert each input row into a `SourceRecord` (Jackson tree). Keep all
-   LIS-specific schema knowledge inside this adapter.
-3. Wire it in `cli.MapCommand` (swap `SampleFileSource` for your source).
-- **Do not touch:** domain, mapper, store. Only the wiring line changes.
-
-### Author or change a provenance profile
-
-1. Add / edit a YAML under `resources/profiles/`.
-2. Select it via a CLI option (e.g. `--profile digital-pathology`).
-- **No code.** Profiles are data; `ProfileValidator` reads them.
+2. Make it satisfy the mapping port in `port`.
+3. Wire it in `cli`.
+- **Do not touch:** `domain`, `port`, other adapters. Mapping changes are
+  expected and stay contained behind the port.
 
 ### Swap the store or the signer
 
-1. Implement `ProvenanceStore` (or `DocumentSigner`) in `adapter.out`.
-2. Wire it in `cli.MapCommand`.
+1. Add a class in `adapter/out` satisfying the output port (store or signer).
+2. Wire it in `cli`.
 - **Do not touch:** domain or other adapters.
 
-### Add a Claude skill
+## Conventions
 
-Author it under `.claude/skills/<name>/`. Skills are deferred until the
-workflows they would automate are known.
-
-## 6. Conventions
-
-- `domain` and `port` packages must not import any framework, HTTP, file, DB,
-  CPM-library, or crypto type. If you reach for one of those, you're in an adapter.
+- `domain` and `port` must not import any framework, HTTP, file, DB, CPM-library,
+  or crypto type. If you reach for one of those, you are in an adapter.
 - All wiring (constructing concrete adapters) lives only in `cli`.
-- Each non-trivial piece of logic ships with one runnable check (a JUnit test or
-  an `assert`-based self-check) — see the project conventions in `AGENTS.md`.
+- Each non-trivial unit ships with one runnable check (a JUnit test or an
+  `assert`-based self-check). No test-framework sprawl. See `AGENTS.md`.

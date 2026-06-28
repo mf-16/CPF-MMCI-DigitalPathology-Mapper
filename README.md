@@ -2,8 +2,7 @@
 
 Transforms MMCI (Masaryk Memorial Cancer Institute) biobank / digital-pathology
 data into **Common Provenance Model (CPM, ISO 23494)** documents and stores them
-in **CPF-Storage**. Master's thesis project, part of the Common Provenance
-Framework (CPF).
+in **CPF-Storage**. A component of the Common Provenance Framework (CPF).
 
 ```
 biobank record → CPM document → signed PROV-JSON → CPF-Storage (+ Neo4j)
@@ -16,18 +15,12 @@ It sits between two existing components:
 - **CPF-Storage** — Spring Boot + Neo4j service that persists signed provenance
   documents over REST.
 
-## Why it exists
+## Design
 
-The real LIS database and the final field mapping are not available yet. The
-project is built so the **input source** and the **mapping** are swappable
-(hexagonal / ports & adapters): development proceeds against mock/sample data now
-and the real LIS adapter drops in later without touching the core. See
-**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
-
-A second goal is a **configurable minimal-scope model**: a declarative YAML
-*provenance profile* that defines which provenance must be captured for a given
-process, validated automatically. See
-[ARCHITECTURE.md §4](docs/ARCHITECTURE.md#4-the-configurable-minimal-scope-model-provenanceprofile).
+Built as **hexagonal / ports & adapters**: the input source, the mapping, and the
+storage backend each sit behind an interface at the edge, so the core logic
+depends on none of them and any one can be replaced without touching the others.
+See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Status
 

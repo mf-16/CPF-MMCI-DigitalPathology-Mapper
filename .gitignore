@@ -1,0 +1,29 @@
+# Maven
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / local sandbox (never commit keys or certs)
+*.key
+*.pem
+*.p12
+*.jks
+sandbox/
+.env
+.env.local
+
+# Logs
+*.log

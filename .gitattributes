@@ -1,0 +1,8 @@
+# Normalize line endings to LF. Do NOT enable core.autocrlf=true:
+# CRLF silently breaks shell scripts / container entrypoints across CPF repos.
+* text=auto eol=lf
+
+# Binaries
+*.jar binary
+*.png binary
+*.pdf binary

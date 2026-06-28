@@ -1,6 +1,8 @@
 # Maven
 target/
 *.class
+dependency-reduced-pom.xml
+cp.txt
 
 # IDE
 .idea/

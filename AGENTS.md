@@ -18,28 +18,38 @@ recipes: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Status
 
-Scaffold only. The `src/` tree is created but empty (`.gitkeep` placeholders).
-No production code yet — implementation follows the recipes in ARCHITECTURE.md.
+First end-to-end slice works: reads a LIS-style case from `src/main/resources/samples/`,
+maps it into the `aplab:preanalyticsIn_bundle` CPM bundle, signs it, and writes
+the PROV-JSON + the CPF-Storage upload body to an output dir (dry-run). Live
+upload is wired but optional (`--post`).
 
 ## Build / run / test
 
-- **JDK 25** (latest LTS) and Maven 3.9+.
+- **JDK 23+** required (the CPM library is compiled for Java 23). Built/tested on
+  **Temurin 25**. Maven 3.9+. Point Maven at the JDK, e.g.
+  `JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-25.0.3.9-hotspot"`.
 - Build: `mvn package` → runnable jar `target/cpf-mmci-mapper.jar`.
-- Test: `mvn test`.
-- Run: a CLI entry point in `cli` (once it exists) → `java -jar target/cpf-mmci-mapper.jar ...`.
+- Test: `mvn test` (self-check asserts the bundle matches the reference diagram).
+- Run (dry-run): `java -jar target/cpf-mmci-mapper.jar --in src/main/resources/samples --out target/out`
+  → `target/out/aplab_preanalyticsIn_bundle.json` (PROV-JSON) + `.request.json`
+  (the `DocumentFormDTO` body). Add `--post <storeBaseUrl> --org <id>` to also POST.
 
-### Prerequisite: the CPM library
+### Prerequisite: the CPM library (one-time local install)
 
-This depends on `cz.muni.fi.cpm:cpm-core` + `cpm-template` (v1.0.0). If Maven
-cannot resolve them, build them locally first:
+Depends on `cz.muni.fi.cpm:cpm-core:1.0.0`, which is **not on Maven Central**.
+The jar is vendored in the sibling repo `../CPF-Search-API` — install it (and its
+ProvToolbox deps come from Central) into your local `~/.m2`:
 
 ```bash
-git clone https://github.com/Common-Provenance-Framework/CPF-Toolbox.git
-mvn -f CPF-Toolbox install        # may need JDK 23 for CPF-Toolbox's own build
+RES=../CPF-Search-API/bundle-search/src/main/resources
+mvn install:install-file -Dfile="$RES/cpm-core-1.0.0.jar" \
+  -DgroupId=cz.muni.fi.cpm -DartifactId=cpm-core -Dversion=1.0.0 -Dpackaging=jar
 ```
 
-This project still targets JDK 25; JDK 23 (if needed) is only for that one
-`install` of the upstream library.
+The jar carries an internal pom referencing a non-existent parent `cz.muni.fi.cpm:cpm`,
+so if `install-file` picks that up and resolution later fails, reinstall with a
+flat hand-written pom via `-DpomFile`. ProvToolbox deps (`prov-model`,
+`prov-interop`, `prov-nf` 2.2.1; `prov-json` 1.0.0) are declared in `pom.xml`.
 
 ### Downstream: CPF-Storage
 
@@ -50,15 +60,17 @@ generation and the document-upload contract.
 
 ## The boundaries (swap points)
 
-Nothing is implemented yet. The intended edges, each to sit behind a port
-interface in `port/`:
+Ports in `port/`, with their current adapters:
 
-- **input** — read records from a source (`adapter/in`)
-- **mapping** — turn a record into a CPM document (`adapter/map`)
-- **output** — persist to CPF-Storage and sign for storage (`adapter/out`)
+| Port | Current adapter | Swap to |
+|---|---|---|
+| `ProvenanceSource` | `adapter/in/FileProvenanceSource` (reads `*.json`) | a real LIS reader |
+| `CpmMapper` | `adapter/map/DigitalPathologyMapper` (builds the bundle) | a revised/another mapping |
+| `ProvenanceStore` | `adapter/out/FileDumpStore` (+ optional `CpfStorageClient`) | another store |
+| `DocumentSigner` | `adapter/out/EcDocumentSigner` (SHA256withECDSA) | the org's real key |
 
-To add a source / mapper / store, follow the recipes in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#how-to-add-x).
+Wiring is in `cli/MapCommand`. To add a source / mapper / store, follow the
+recipes in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#how-to-add-x).
 
 ## Conventions
 

@@ -24,28 +24,28 @@ See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Status
 
-Scaffold. The `src/` tree exists but is empty; implementation follows the
-recipes in ARCHITECTURE.md.
+First mapping works end to end: a sample LIS case
+(`src/main/resources/samples/`) is mapped into the `aplab:preanalyticsIn_bundle`
+CPM bundle, signed, and written as PROV-JSON + a CPF-Storage upload body
+(dry-run). Live upload is optional (`--post`).
 
-## Build
+## Build & run
 
-Requires **JDK 25** and Maven 3.9+.
+Requires **JDK 23+** (the CPM library is compiled for Java 23; built on
+Temurin 25) and Maven 3.9+.
 
 ```bash
 mvn package        # -> target/cpf-mmci-mapper.jar
 mvn test
+java -jar target/cpf-mmci-mapper.jar --in src/main/resources/samples --out target/out
+# -> target/out/aplab_preanalyticsIn_bundle.json  (+ .request.json upload body)
 ```
 
-**Prerequisite:** the CPM library must be resolvable. If it is not on a
-configured Maven repository, build it locally first:
-
-```bash
-git clone https://github.com/Common-Provenance-Framework/CPF-Toolbox.git
-mvn -f CPF-Toolbox install      # this upstream build may require JDK 23
-```
-
-For developer/agent details (ports, conventions, running against CPF-Storage),
-see [AGENTS.md](AGENTS.md).
+**Prerequisite:** the CPM library (`cz.muni.fi.cpm:cpm-core:1.0.0`) is not on
+Maven Central; install the vendored jar from the sibling `CPF-Search-API` repo
+into your local `~/.m2` once. See [AGENTS.md](AGENTS.md) for the exact command
+and the rest of the developer setup (ports, conventions, running against
+CPF-Storage).
 
 ## License
 

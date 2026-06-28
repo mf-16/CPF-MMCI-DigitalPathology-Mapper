@@ -1,12 +1,11 @@
 # Architecture
 
 For whoever works on the system next — developer or AI. It states what the
-product does, the architectural pattern it follows, and where new code goes.
+product does, the architectural pattern it follows, and where code goes.
 
-Nothing is implemented yet: the `src/` tree is an empty skeleton (`.gitkeep`
-placeholders). This document describes the **intended structure**, not existing
-code. No class or interface named below exists yet — the names appear only when
-they are written.
+The first mapping is implemented (LIS files → `aplab:preanalyticsIn_bundle` →
+dry-run store). The package roles below are concrete; the "How to add X" recipes
+are how you extend it.
 
 ## What this is
 
@@ -68,24 +67,22 @@ two are connected in exactly one place — the composition root in `cli`.
 
 If the domain still compiles after every adapter is deleted, the boundary is correct.
 
-## Directory skeleton
+## Package layout
 
-Base package `cz.muni.fi.cpf.mmci`. Each directory exists (empty) with the role
-below.
+Base package `cz.muni.fi.cpf.mmci`.
 
-| Directory | Ring | Role — what belongs here |
+| Directory | Ring | Role — and what's there now |
 |---|---|---|
-| `domain/model` | domain | plain value types passed along the pipeline |
-| `domain` | domain | the orchestration that drives read → map → sign → store |
-| `port` | port | the interfaces the domain declares: input boundaries (reading records, mapping) and output boundaries (storing, signing) |
-| `adapter/in` | adapter | read from an input system, produce the domain's input type |
-| `adapter/map` | adapter | build CPM documents (uses the CPM library) |
-| `adapter/out` | adapter | persist to CPF-Storage; sign for storage |
-| `cli` | adapter | composition root — construct concrete adapters and wire them into the domain |
+| `domain/model` | domain | value types: `SourceRecord`, `MappedDocument`, `SignedDocument` |
+| `domain` | domain | `MappingPipeline` — drives read → map → sign → store |
+| `port` | port | `ProvenanceSource`, `CpmMapper`, `ProvenanceStore`, `DocumentSigner` |
+| `adapter/in` | adapter | `FileProvenanceSource` (reads `*.json`) |
+| `adapter/map` | adapter | `DigitalPathologyMapper` (builds the bundle via the CPM library) |
+| `adapter/out` | adapter | `FileDumpStore`, `CpfStorageClient`, `EcDocumentSigner` |
+| `cli` | adapter | `MapCommand` — composition root wiring the adapters into the pipeline |
 
-A neutral input value type (decoupling the domain from any specific source
-schema) and CPM document handling are the first things to define; see the
-recipes below.
+`SourceRecord` is a neutral JSON-tree value, decoupling the domain from any
+specific source schema.
 
 ## How to add X
 

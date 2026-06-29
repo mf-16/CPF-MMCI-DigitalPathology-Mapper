@@ -14,7 +14,13 @@ input system → read a record → map to a CPM document
 ```
 
 Architecture is hexagonal (ports & adapters). Full design and "how to add X"
-recipes: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+recipes: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. The produced provenance
+graph (backbone + domain) is drawn in **[docs/GRAPH.md](docs/GRAPH.md)**.
+
+The mapper is **data-driven**: the input lists `agents`, `connectors`,
+`mainActivity`, `entities`, `activities`, and a `relations[]` array; the mapper
+types each node and auto-generates the traversal-information backbone, then
+translates the domain relations one-to-one.
 
 ## Status
 

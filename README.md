@@ -24,10 +24,12 @@ See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Status
 
-First mapping works end to end: a sample LIS case
-(`src/main/resources/samples/`) is mapped into the `aplab:preanalyticsIn_bundle`
-CPM bundle, signed, and written as PROV-JSON + a CPF-Storage upload body
-(dry-run). Live upload is optional (`--post`).
+First mapping works end to end: a sample case
+(`src/main/resources/samples/`) listing the provenance nodes and relations is
+mapped into the `aplab:preanalyticsIn_bundle` CPM bundle — a traversal-information
+backbone plus a domain chain — then signed and written as PROV-JSON + a
+CPF-Storage upload body (dry-run). Live upload is optional (`--post`). The
+produced graph is drawn in **[docs/GRAPH.md](docs/GRAPH.md)**.
 
 ## Build & run
 

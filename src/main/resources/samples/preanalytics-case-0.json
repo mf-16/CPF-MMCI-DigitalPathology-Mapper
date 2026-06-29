@@ -6,91 +6,57 @@
     "localName": "preanalyticsIn_bundle",
     "referencedMetaBundleId": "preanalyticsIn_bundle_meta"
   },
-  "senderDepartment": {
-    "id": "surgical-department",
-    "name": "Surgical Department",
-    "contactIdPid": "orgpid:surgical-dept-01"
-  },
-  "laboratory": {
-    "id": "anapath-laboratory",
-    "name": "AnaPath Laboratory"
-  },
-  "upstream": {
-    "connectorId": "sample-connector",
-    "connectorName": "Sample connector",
-    "externalId": "sample-id-0",
-    "referencedBundleId": "preanalyticsOut_bundle",
-    "referencedMetaBundleId": "preanalyticsOut_bundle_meta",
-    "hashAlg": "SHA256",
-    "referencedBundleHashValue": "0000000000000000000000000000000000000000000000000000000000000000"
-  },
-  "specimen": {
-    "id": "tissue",
-    "name": "Tissue",
-    "externalId": "sample-id-0"
-  },
-  "steps": [
+  "agents": [
     {
-      "activity": "accessioning", "name": "Accessioning",
-      "start": "2026-06-01T08:00:00", "end": "2026-06-01T08:10:00",
-      "input": "tissue",
-      "output": { "id": "registered-sample", "name": "Registered sample", "externalId": "sample-id-0" }
+      "id": "surgical-department",
+      "name": "Surgical Department",
+      "cpmType": "senderAgent",
+      "contactIdPid": "orgpid:surgical-dept-01"
     },
     {
-      "activity": "grossing", "name": "Grossing",
-      "start": "2026-06-01T09:00:00", "end": "2026-06-01T09:30:00",
-      "input": "registered-sample",
-      "output": { "id": "sub-sample", "name": "Sub-sample", "externalId": "sample-id-0" }
-    },
-    {
-      "activity": "processing", "name": "Processing",
-      "start": "2026-06-01T10:00:00", "end": "2026-06-01T18:00:00",
-      "input": "sub-sample",
-      "output": { "id": "processed-sub-sample", "name": "Processed sub-sample", "externalId": "sample-id-0" }
-    },
-    {
-      "activity": "embedding", "name": "Embedding",
-      "start": "2026-06-02T08:00:00", "end": "2026-06-02T08:30:00",
-      "input": "processed-sub-sample",
-      "output": { "id": "ffpe-block", "name": "FFPE block", "externalId": "block-id-0" }
-    },
-    {
-      "activity": "microtomy", "name": "Microtomy",
-      "start": "2026-06-02T09:00:00", "end": "2026-06-02T09:20:00",
-      "input": "ffpe-block",
-      "output": { "id": "tissue-slice-1", "name": "Tissue slice 1", "externalId": "slice-id-0" },
-      "alsoProduces": { "id": "residual-ffpe-block", "name": "Residual FFPE block" }
-    },
-    {
-      "activity": "slide-preparation", "name": "Slide preparation",
-      "start": "2026-06-02T09:30:00", "end": "2026-06-02T09:45:00",
-      "input": "tissue-slice-1",
-      "output": { "id": "slide-1", "name": "Slide 1", "externalId": "slide-id-0" }
-    },
-    {
-      "activity": "staining", "name": "Staining",
-      "start": "2026-06-02T10:00:00", "end": "2026-06-02T10:30:00",
-      "input": "slide-1",
-      "output": { "id": "slide-1-stained", "name": "Slide 1 with stained tissue", "externalId": "slide-id-0" }
-    },
-    {
-      "activity": "coverslipping", "name": "Coverslipping",
-      "start": "2026-06-02T11:00:00", "end": "2026-06-02T11:10:00",
-      "input": "slide-1-stained",
-      "output": { "id": "final-slide-1", "name": "Final slide 1", "externalId": "slide-id-0.1" }
-    },
-    {
-      "activity": "storage", "name": "Storage",
-      "start": "2026-06-02T12:00:00", "end": "2026-06-02T12:05:00",
-      "input": "residual-ffpe-block"
+      "id": "anapath-laboratory",
+      "name": "AnaPath Laboratory",
+      "cpmType": "currentAgent"
     }
   ],
-  "forwardConnectors": [
+  "mainActivity": {
+    "id": "physical-slide-preparation",
+    "name": "Physical slide preparation",
+    "referencedMetaBundleId": "preanalyticsIn_bundle_meta"
+  },
+  "connectors": [
     {
-      "id": "slide-1-connector",
-      "name": "Slide 1 connector",
+      "id": "sample-connector",
+      "name": "Sample connector",
+      "cpmType": "backwardConnector",
+      "externalId": "sample-id-0",
+      "referencedBundleId": "preanalyticsOut_bundle",
+      "referencedMetaBundleId": "preanalyticsOut_bundle_meta",
+      "hashAlg": "SHA256",
+      "referencedBundleHashValue": "0000000000000000000000000000000000000000000000000000000000000000",
+      "specializationOf": "tissue"
+    },
+    {
+      "id": "slide-connector",
+      "name": "Slide connector",
+      "cpmType": "forwardConnector",
       "externalId": "slide-id-0",
-      "specializationOf": "final-slide-1"
+      "specializationOf": "final-slide"
     }
+  ],
+  "entities": [
+    { "id": "tissue", "name": "Tissue", "externalId": "sample-id-0" },
+    { "id": "ffpe-block", "name": "FFPE block", "externalId": "block-id-0" },
+    { "id": "final-slide", "name": "Final slide", "externalId": "slide-id-0" }
+  ],
+  "activities": [
+    { "id": "embedding", "name": "Embedding", "start": "2026-06-02T08:00:00", "end": "2026-06-02T08:30:00" },
+    { "id": "slide-preparation", "name": "Slide preparation", "start": "2026-06-02T09:30:00", "end": "2026-06-02T09:45:00" }
+  ],
+  "relations": [
+    { "type": "used", "from": "embedding", "to": "tissue" },
+    { "type": "wasGeneratedBy", "from": "ffpe-block", "to": "embedding" },
+    { "type": "used", "from": "slide-preparation", "to": "ffpe-block" },
+    { "type": "wasGeneratedBy", "from": "final-slide", "to": "slide-preparation" }
   ]
 }

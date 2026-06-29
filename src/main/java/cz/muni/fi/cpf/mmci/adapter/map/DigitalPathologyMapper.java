@@ -13,12 +13,14 @@ import org.openprovenance.prov.model.Activity;
 import org.openprovenance.prov.model.Agent;
 import org.openprovenance.prov.model.Attribute;
 import org.openprovenance.prov.model.Document;
+import org.openprovenance.prov.model.Element;
 import org.openprovenance.prov.model.Entity;
 import org.openprovenance.prov.model.Name;
 import org.openprovenance.prov.model.Namespace;
 import org.openprovenance.prov.model.QualifiedName;
 import org.openprovenance.prov.model.Statement;
 import org.openprovenance.prov.model.interop.Formats;
+import org.openprovenance.prov.vanilla.ProvFactory;
 
 import javax.xml.datatype.DatatypeFactory;
 import javax.xml.datatype.XMLGregorianCalendar;
@@ -29,19 +31,27 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Maps a LIS-style digital-pathology case into the {@code preanalyticsIn_bundle}
- * CPM bundle: a provenance backbone (sender agent, backward/forward connectors,
- * main activity, current agent) over the domain chain
- * (Tissue -> Accessioning -> ... -> Final slide).
+ * Maps a digital-pathology case into a CPM bundle. The input lists the nodes
+ * (agents, connectors, main activity, domain entities/activities) and the domain
+ * relations explicitly; this mapper:
  *
- * <p>All knowledge of the LIS JSON shape lives here. To change the mapping,
- * change this class; nothing else moves.
+ * <ul>
+ *   <li>types each node with its CPM type,</li>
+ *   <li><b>generates the traversal-information backbone</b> from the typed nodes
+ *       (so it is always correct): backwardConnector wasAttributedTo senderAgent,
+ *       mainActivity used backwardConnector, mainActivity wasAssociatedWith
+ *       currentAgent, forwardConnector wasGeneratedBy mainActivity, and each
+ *       connector specializationOf its domain entity,</li>
+ *   <li>and translates the domain {@code relations[]} one-to-one.</li>
+ * </ul>
+ *
+ * To change the mapping, change this class; nothing else moves.
  */
 public final class DigitalPathologyMapper implements CpmMapper {
 
     private static final String DCT = "http://purl.org/dc/terms/";
 
-    private final org.openprovenance.prov.vanilla.ProvFactory pF = new org.openprovenance.prov.vanilla.ProvFactory();
+    private final ProvFactory pF = new ProvFactory();
     private final ICpmProvFactory cpmPF = new CpmProvFactory(pF);
     private final Name name = pF.getName();
     private final DatatypeFactory xml;
@@ -63,176 +73,167 @@ public final class DigitalPathologyMapper implements CpmMapper {
         String relNs = ns + "rel/";
 
         List<Statement> statements = new ArrayList<>();
-        int[] relCounter = {0};
+        Map<String, QualifiedName> nodes = new LinkedHashMap<>(); // every node id -> QN
+        int[] rel = {0};
 
-        // --- domain entities: specimen + each step output (+ alsoProduces) ---
-        Map<String, QualifiedName> entityIds = new LinkedHashMap<>();
-        Map<String, QualifiedName> identifierIds = new LinkedHashMap<>(); // externalId value -> identifier entity
-
-        JsonNode specimen = root.get("specimen");
-        addEntity(statements, entityIds, identifierIds, ns, prefix, specimen, relCounter, relNs);
-
-        // --- domain activities, in order, with their used/generated edges ---
-        List<QualifiedName> partActivities = new ArrayList<>();
-        for (JsonNode step : root.withArray("steps")) {
-            String actKey = step.get("activity").asText();
-            QualifiedName actQn = qn(ns, prefix, actKey);
-            partActivities.add(actQn);
-            Activity activity = pF.newActivity(actQn, text(step, "name", actKey));
-            setTimes(activity, step);
-            statements.add(activity);
-
-            if (step.hasNonNull("input")) {
-                QualifiedName in = entityIds.get(step.get("input").asText());
-                if (in != null) {
-                    statements.add(pF.newUsed(relId(relNs, relCounter), actQn, in));
-                }
+        // --- agents ---
+        QualifiedName senderQn = null;
+        QualifiedName currentQn = null;
+        for (JsonNode a : root.withArray("agents")) {
+            String id = a.get("id").asText();
+            QualifiedName qn = qn(ns, prefix, id);
+            String cpmType = text(a, "cpmType", "");
+            List<Attribute> attrs = new ArrayList<>();
+            if (a.hasNonNull("contactIdPid")) {
+                attrs.add(cpmPF.newCpmAttribute(CpmAttribute.CONTACT_ID_PID, a.get("contactIdPid").asText(), name.XSD_STRING));
             }
-            if (step.has("output")) {
-                QualifiedName out = addEntity(statements, entityIds, identifierIds, ns, prefix,
-                        step.get("output"), relCounter, relNs);
-                statements.add(pF.newWasGeneratedBy(relId(relNs, relCounter), out, actQn));
+            Agent agent;
+            if ("senderAgent".equals(cpmType)) {
+                agent = cpmPF.newCpmAgent(qn, CpmType.SENDER_AGENT, attrs);
+                senderQn = qn;
+            } else if ("receiverAgent".equals(cpmType)) {
+                agent = cpmPF.newCpmAgent(qn, CpmType.RECEIVER_AGENT, attrs);
+            } else {
+                // CpmType has no CURRENT_AGENT in this version; set cpm:currentAgent directly.
+                agent = pF.newAgent(qn);
+                attrs.forEach(att -> agent.getOther().add((org.openprovenance.prov.model.Other) att));
+                agent.getType().add(pF.newType(cpmPF.newCpmQualifiedName("currentAgent"), name.PROV_QUALIFIED_NAME));
+                currentQn = qn;
             }
-            if (step.has("alsoProduces")) {
-                QualifiedName also = addEntity(statements, entityIds, identifierIds, ns, prefix,
-                        step.get("alsoProduces"), relCounter, relNs);
-                statements.add(pF.newWasGeneratedBy(relId(relNs, relCounter), also, actQn));
-            }
+            label(agent, text(a, "name", id));
+            statements.add(agent);
+            nodes.put(id, qn);
         }
 
-        // --- backbone: sender agent + backward connector ---
-        JsonNode sender = root.get("senderDepartment");
-        QualifiedName senderQn = qn(ns, prefix, sender.get("id").asText());
-        List<Attribute> senderAttrs = new ArrayList<>();
-        if (sender.hasNonNull("contactIdPid")) {
-            senderAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.CONTACT_ID_PID,
-                    sender.get("contactIdPid").asText(), name.XSD_STRING));
-        }
-        Agent senderAgent = cpmPF.newCpmAgent(senderQn, CpmType.SENDER_AGENT, senderAttrs);
-        label(senderAgent, sender.get("name").asText());
-        statements.add(senderAgent);
-
-        JsonNode up = root.get("upstream");
-        QualifiedName backConnQn = qn(ns, prefix, up.get("connectorId").asText());
-        List<Attribute> backAttrs = new ArrayList<>();
-        backAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.EXTERNAL_ID, up.get("externalId").asText(), name.XSD_STRING));
-        backAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.REFERENCED_BUNDLE_ID, qn(ns, prefix, up.get("referencedBundleId").asText())));
-        backAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.REFERENCED_META_BUNDLE_ID, qn(ns, prefix, up.get("referencedMetaBundleId").asText())));
-        backAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.REFERENCED_BUNDLE_HASH_VALUE, up.get("referencedBundleHashValue").asText(), name.XSD_STRING));
-        backAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.HASH_ALG, up.get("hashAlg").asText(), name.XSD_STRING));
-        Entity backConnector = cpmPF.newCpmEntity(backConnQn, CpmType.BACKWARD_CONNECTOR, backAttrs);
-        label(backConnector, text(up, "connectorName", "Sample connector"));
-        statements.add(backConnector);
-        // ponytail: dropped the diagram's standalone surDep:preanalyticsOut_bundle line —
-        // it is already captured by REFERENCED_BUNDLE_ID. Add back if a profile demands it.
-
-        // --- backbone: main activity over the domain steps ---
-        QualifiedName mainQn = qn(ns, prefix, "physical-slide-preparation");
+        // --- main activity (over the domain activities) ---
+        JsonNode mainNode = root.get("mainActivity");
+        String mainId = mainNode.get("id").asText();
+        QualifiedName mainQn = qn(ns, prefix, mainId);
         List<Attribute> mainAttrs = new ArrayList<>();
-        mainAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.REFERENCED_META_BUNDLE_ID,
-                qn(ns, prefix, text(bundle, "referencedMetaBundleId", "preanalyticsIn_bundle_meta"))));
+        if (mainNode.hasNonNull("referencedMetaBundleId")) {
+            mainAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.REFERENCED_META_BUNDLE_ID,
+                    qn(ns, prefix, mainNode.get("referencedMetaBundleId").asText())));
+        }
         QualifiedName hasPart = pF.newQualifiedName(DCT, "hasPart", "dct");
-        for (QualifiedName part : partActivities) {
-            mainAttrs.add(pF.newOther(hasPart, part, name.PROV_QUALIFIED_NAME));
+        for (JsonNode act : root.withArray("activities")) {
+            mainAttrs.add(pF.newOther(hasPart, qn(ns, prefix, act.get("id").asText()), name.PROV_QUALIFIED_NAME));
         }
         Activity mainActivity = cpmPF.newCpmActivity(mainQn, null, null, CpmType.MAIN_ACTIVITY, mainAttrs);
-        label(mainActivity, "Physical slide preparation");
+        label(mainActivity, text(mainNode, "name", mainId));
         statements.add(mainActivity);
+        nodes.put(mainId, mainQn);
 
-        // --- backbone: current agent (the lab) ---
-        JsonNode lab = root.get("laboratory");
-        QualifiedName labQn = qn(ns, prefix, lab.get("id").asText());
-        Agent currentAgent = pF.newAgent(labQn, lab.get("name").asText());
-        // CpmType has no CURRENT_AGENT in this version; set the cpm:currentAgent type directly.
-        currentAgent.getType().add(pF.newType(cpmPF.newCpmQualifiedName("currentAgent"), name.PROV_QUALIFIED_NAME));
-        statements.add(currentAgent);
-
-        // --- backbone relations ---
-        statements.add(pF.newWasAttributedTo(relId(relNs, relCounter), backConnQn, senderQn));
-        statements.add(pF.newUsed(relId(relNs, relCounter), mainQn, backConnQn));
-        statements.add(pF.newWasAssociatedWith(relId(relNs, relCounter), mainQn, labQn));
-        // Tissue (specimen) specializes the incoming Sample connector.
-        statements.add(pF.newSpecializationOf(entityIds.get(specimen.get("id").asText()), backConnQn));
-
-        // --- backbone: forward connectors ---
-        for (JsonNode fc : root.withArray("forwardConnectors")) {
-            QualifiedName fcQn = qn(ns, prefix, fc.get("id").asText());
-            List<Attribute> fcAttrs = new ArrayList<>();
-            if (fc.hasNonNull("externalId")) {
-                fcAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.EXTERNAL_ID, fc.get("externalId").asText(), name.XSD_STRING));
+        // --- connectors ---
+        List<QualifiedName> backwardConnectors = new ArrayList<>();
+        List<QualifiedName> forwardConnectors = new ArrayList<>();
+        List<String[]> connectorSpecializations = new ArrayList<>(); // {connectorId, targetEntityId}
+        for (JsonNode c : root.withArray("connectors")) {
+            String id = c.get("id").asText();
+            QualifiedName qn = qn(ns, prefix, id);
+            boolean backward = "backwardConnector".equals(text(c, "cpmType", ""));
+            List<Attribute> attrs = new ArrayList<>();
+            if (c.hasNonNull("externalId")) {
+                attrs.add(cpmPF.newCpmAttribute(CpmAttribute.EXTERNAL_ID, c.get("externalId").asText(), name.XSD_STRING));
             }
-            Entity fwd = cpmPF.newCpmEntity(fcQn, CpmType.FORWARD_CONNECTOR, fcAttrs);
-            label(fwd, text(fc, "name", fc.get("id").asText()));
-            statements.add(fwd);
-            statements.add(pF.newWasGeneratedBy(relId(relNs, relCounter), fcQn, mainQn));
-            statements.add(pF.newWasDerivedFrom(fcQn, backConnQn));
-            if (fc.hasNonNull("specializationOf")) {
-                QualifiedName spec = entityIds.get(fc.get("specializationOf").asText());
-                if (spec != null) {
-                    statements.add(pF.newSpecializationOf(spec, fcQn));
-                }
+            if (c.hasNonNull("referencedBundleId")) {
+                attrs.add(cpmPF.newCpmAttribute(CpmAttribute.REFERENCED_BUNDLE_ID, qn(ns, prefix, c.get("referencedBundleId").asText())));
+            }
+            if (c.hasNonNull("referencedMetaBundleId")) {
+                attrs.add(cpmPF.newCpmAttribute(CpmAttribute.REFERENCED_META_BUNDLE_ID, qn(ns, prefix, c.get("referencedMetaBundleId").asText())));
+            }
+            if (c.hasNonNull("referencedBundleHashValue")) {
+                attrs.add(cpmPF.newCpmAttribute(CpmAttribute.REFERENCED_BUNDLE_HASH_VALUE, c.get("referencedBundleHashValue").asText(), name.XSD_STRING));
+            }
+            if (c.hasNonNull("hashAlg")) {
+                attrs.add(cpmPF.newCpmAttribute(CpmAttribute.HASH_ALG, c.get("hashAlg").asText(), name.XSD_STRING));
+            }
+            Entity connector = cpmPF.newCpmEntity(qn, backward ? CpmType.BACKWARD_CONNECTOR : CpmType.FORWARD_CONNECTOR, attrs);
+            label(connector, text(c, "name", id));
+            statements.add(connector);
+            nodes.put(id, qn);
+            (backward ? backwardConnectors : forwardConnectors).add(qn);
+            if (c.hasNonNull("specializationOf")) {
+                connectorSpecializations.add(new String[]{id, c.get("specializationOf").asText()});
             }
         }
 
-        // --- identifier entities (one per external id) ---
-        for (Map.Entry<String, QualifiedName> e : identifierIds.entrySet()) {
-            List<Attribute> idAttrs = new ArrayList<>();
-            idAttrs.add(cpmPF.newCpmAttribute(CpmAttribute.EXTERNAL_ID, e.getKey(), name.XSD_STRING));
-            Entity idEntity = cpmPF.newCpmEntity(e.getValue(), CpmType.IDENTIFIER, idAttrs);
-            statements.add(idEntity);
+        // --- domain entities ---
+        for (JsonNode e : root.withArray("entities")) {
+            String id = e.get("id").asText();
+            QualifiedName qn = qn(ns, prefix, id);
+            Entity entity = pF.newEntity(qn);
+            label(entity, text(e, "name", id));
+            if (e.hasNonNull("externalId")) {
+                entity.getOther().add(cpmPF.newCpmAttribute(CpmAttribute.EXTERNAL_ID, e.get("externalId").asText(), name.XSD_STRING));
+            }
+            statements.add(entity);
+            nodes.put(id, qn);
+        }
+
+        // --- domain activities ---
+        for (JsonNode act : root.withArray("activities")) {
+            String id = act.get("id").asText();
+            QualifiedName qn = qn(ns, prefix, id);
+            Activity activity = pF.newActivity(qn);
+            label(activity, text(act, "name", id));
+            if (act.hasNonNull("start")) activity.setStartTime(cal(act.get("start").asText()));
+            if (act.hasNonNull("end")) activity.setEndTime(cal(act.get("end").asText()));
+            statements.add(activity);
+            nodes.put(id, qn);
+        }
+
+        // --- traversal-information backbone (generated, always correct) ---
+        for (QualifiedName b : backwardConnectors) {
+            if (senderQn != null) statements.add(pF.newWasAttributedTo(relId(relNs, rel), b, senderQn));
+            statements.add(pF.newUsed(relId(relNs, rel), mainQn, b));
+        }
+        for (QualifiedName f : forwardConnectors) {
+            statements.add(pF.newWasGeneratedBy(relId(relNs, rel), f, mainQn));
+        }
+        if (currentQn != null) {
+            statements.add(pF.newWasAssociatedWith(relId(relNs, rel), mainQn, currentQn));
+        }
+        for (String[] cs : connectorSpecializations) {
+            // connector is the specific entity, the domain entity is the general one
+            statements.add(pF.newSpecializationOf(nodes.get(cs[0]), require(nodes, cs[1])));
+        }
+
+        // --- domain relations (one-to-one from the input) ---
+        for (JsonNode r : root.withArray("relations")) {
+            statements.add(relation(r, nodes, relNs, rel));
         }
 
         // --- assemble bundle + document ---
         String bundleLocal = text(bundle, "localName", "preanalyticsIn_bundle");
-        QualifiedName bundleQn = qn(ns, prefix, bundleLocal);
         Namespace namespace = cpmPF.newCpmNamespace();
         namespace.register(prefix, ns);
         namespace.register("dct", DCT);
         namespace.register("rel", relNs);
 
         Document document = pF.newDocument();
-        document.getStatementOrBundle().add(pF.newNamedBundle(bundleQn, namespace, statements));
+        document.getStatementOrBundle().add(pF.newNamedBundle(qn(ns, prefix, bundleLocal), namespace, statements));
         document.setNamespace(namespace);
 
         return new MappedDocument(prefix + ":" + bundleLocal, serialize(document));
     }
 
-    /** Creates an entity for a {id,name,externalId} node, wires externalId attr + alternateOf. */
-    private QualifiedName addEntity(List<Statement> out, Map<String, QualifiedName> entityIds,
-                                    Map<String, QualifiedName> identifierIds, String ns, String prefix,
-                                    JsonNode node, int[] relCounter, String relNs) {
-        String id = node.get("id").asText();
-        QualifiedName qn = qn(ns, prefix, id);
-        if (entityIds.containsKey(id)) {
-            return qn; // already created
-        }
-        Entity entity = pF.newEntity(qn, text(node, "name", id));
-        if (node.hasNonNull("externalId")) {
-            String ext = node.get("externalId").asText();
-            entity.getOther().add(cpmPF.newCpmAttribute(CpmAttribute.EXTERNAL_ID, ext, name.XSD_STRING));
-            QualifiedName idEntity = identifierIds.computeIfAbsent(ext,
-                    k -> qn(ns, prefix, "id-" + k));
-            out.add(pF.newAlternateOf(qn, idEntity));
-        }
-        out.add(entity);
-        entityIds.put(id, qn);
-        return qn;
+    private Statement relation(JsonNode r, Map<String, QualifiedName> nodes, String relNs, int[] rel) {
+        String type = r.get("type").asText();
+        QualifiedName from = require(nodes, r.get("from").asText());
+        QualifiedName to = require(nodes, r.get("to").asText());
+        return switch (type) {
+            case "used" -> pF.newUsed(relId(relNs, rel), from, to);                 // from=activity, to=entity
+            case "wasGeneratedBy" -> pF.newWasGeneratedBy(relId(relNs, rel), from, to); // from=entity, to=activity
+            case "wasDerivedFrom" -> pF.newWasDerivedFrom(from, to);
+            case "wasAttributedTo" -> pF.newWasAttributedTo(relId(relNs, rel), from, to); // from=entity, to=agent
+            case "wasAssociatedWith" -> pF.newWasAssociatedWith(relId(relNs, rel), from, to); // from=activity, to=agent
+            case "specializationOf" -> pF.newSpecializationOf(from, to);            // from=specific, to=general
+            case "alternateOf" -> pF.newAlternateOf(from, to);
+            default -> throw new IllegalArgumentException("Unknown relation type: " + type);
+        };
     }
 
-    private void setTimes(Activity activity, JsonNode step) {
-        if (step.hasNonNull("start")) {
-            activity.setStartTime(cal(step.get("start").asText()));
-        }
-        if (step.hasNonNull("end")) {
-            activity.setEndTime(cal(step.get("end").asText()));
-        }
-    }
-
-    private XMLGregorianCalendar cal(String iso) {
-        return xml.newXMLGregorianCalendar(iso);
-    }
-
-    private void label(org.openprovenance.prov.model.Element element, String text) {
+    private void label(Element element, String text) {
         element.getLabel().add(pF.newInternationalizedString(text));
     }
 
@@ -242,6 +243,16 @@ public final class DigitalPathologyMapper implements CpmMapper {
 
     private QualifiedName relId(String relNs, int[] counter) {
         return pF.newQualifiedName(relNs, "r" + (counter[0]++), "rel");
+    }
+
+    private static QualifiedName require(Map<String, QualifiedName> nodes, String id) {
+        QualifiedName qn = nodes.get(id);
+        if (qn == null) throw new IllegalArgumentException("Relation references unknown node: " + id);
+        return qn;
+    }
+
+    private XMLGregorianCalendar cal(String iso) {
+        return xml.newXMLGregorianCalendar(iso);
     }
 
     private static String text(JsonNode node, String field, String fallback) {
